@@ -1,0 +1,130 @@
+Shader "Custom/HSVColorReplacement" {
+	Properties{
+		_MainTex("Texture", 2D) = "white" {}
+		_ColorIn("ColorIn", Color) = (1,1,1,1)
+		_ColorOut("ColorOut", Color) = (1,1,1,1)
+		_ColorTolerance("Tolerance", Vector) = (0,0,0,0)
+		_Blend("Threshold", Float) = 0.01
+	}
+		SubShader{
+
+		Tags{ "Queue" = "Transparent" "IgnoreProjector" = "True" "RenderType" = "Transparent" }
+		Blend SrcAlpha OneMinusSrcAlpha
+		Cull Off Lighting Off Fog{ Mode off }
+		ZWrite Off
+		//ColorMask RGBA
+
+		Pass
+	{
+		CGPROGRAM
+		#pragma vertex vert
+		#pragma fragment frag
+		#pragma fragmentoption ARB_precision_hint_fastest 
+
+		#include "UnityCG.cginc"
+
+	struct v2f {
+		float4  pos : SV_POSITION;
+		float2  uv : TEXCOORD0;
+	};
+
+	float4 _MainTex_ST;
+
+	v2f vert(appdata_base v)
+	{
+		v2f o;
+		o.pos = mul(UNITY_MATRIX_MVP, v.vertex);
+		o.uv = TRANSFORM_TEX(v.texcoord, _MainTex);
+		return o;
+	}
+
+
+	half3 rgb_to_hsv(half3 col)
+	{
+		half H = 0.0;
+		half S = 0.0;
+		half V = 0.0;
+
+		half M = max(col.r, max(col.g, col.b));
+		half m = min(col.r, min(col.g, col.b));
+
+		V = M;
+
+		half C = M - m;
+
+		if (C > 0.0)
+		{
+			if (M == col.r) H = fmod((col.g - col.b) / C, 6.0);
+			if (M == col.g) H = (col.b - col.r) / C + 2.0;
+			if (M == col.b) H = (col.r - col.g) / C + 4.0;
+			H /= 6.0;
+			S = C / V;
+		}
+
+		return half3(H, S, V);
+	}
+
+	half3 hsv_to_rgb(half3 col)
+	{
+		half H = col.r;
+		half S = col.g;
+		half V = col.b;
+
+		half C = V * S;
+
+		H *= 6.0;
+		half X = C * (1.0 - abs(fmod(H, 2.0) - 1.0));
+		half m = V - C;
+		C += m;
+		X += m;
+		if (H < 1.0) return half3(C, X, m);
+		if (H < 2.0) return half3(X, C, m);
+		if (H < 3.0) return half3(m, C, X);
+		if (H < 4.0) return half3(m, X, C);
+		if (H < 5.0) return half3(X, m, C);
+		else         return half3(C, m, X);
+	}
+
+	sampler2D _MainTex;
+	half4 _ColorIn;
+	half4 _ColorOut;
+	half4 _ColorTolerance;
+	half	_Blend;
+
+	float4 frag(v2f i) : COLOR
+	{
+		fixed4 texColor = tex2D(_MainTex, i.uv);
+
+		half4 colorHSV = half4(rgb_to_hsv(texColor.rgb), texColor.a);
+		half4 colorInHSV = half4(rgb_to_hsv(_ColorIn.rgb), _ColorIn.a);
+
+		half4 colorDelta = colorHSV - colorInHSV;
+
+		if (abs(colorDelta.r)>0.5) colorDelta.r -= sign(colorDelta.r);
+
+		if ( all( abs(colorDelta) <= _ColorTolerance ))
+		{
+			half4 colorOutHSV = half4(rgb_to_hsv(_ColorOut.rgb), _ColorOut.a);
+
+			texColor = lerp(_ColorOut,
+				half4( hsv_to_rgb(half3(fmod(colorOutHSV.r + colorDelta.r, 1.0),
+					clamp(colorOutHSV.g + colorDelta.g, 0.0, 1.0),
+					clamp(colorOutHSV.b + colorDelta.b, 0.0, 1.0))),
+					clamp(_ColorOut.a + colorDelta.a, 0.0, 1.0)),
+				_Blend);
+		}
+
+		fixed4 finalColor = texColor;
+
+		texColor = finalColor;
+
+	return texColor;
+	}
+
+	
+
+	ENDCG
+	}
+	}
+		Fallback "Diffuse"
+}
